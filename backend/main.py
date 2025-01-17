@@ -1,21 +1,26 @@
+import os
+from dotenv import load_dotenv
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
+from groq import Groq
+import requests
+from bs4 import BeautifulSoup
+
+class Input(BaseModel):
+    link: str
+    prompt: str
 
 
-
-class Item(BaseModel):
-    name: str
-    price: float
-    is_offer: bool = None
-
-class Items(BaseModel):
-    items: List[Item]
-
-
+load_dotenv()
 app = FastAPI()
+
+client = Groq(
+    # This is the default and can be omitted
+    api_key=os.environ.get("GROQ_API_KEY"),
+)
 
 origins = [
     "http://localhost",
@@ -36,14 +41,29 @@ db ={
 async def root():
     return {"message": "Hello World"}
 
-@app.get("/items", response_model=Items)
-async def read_items():
-    return Items(items=db["items"])
 
-@app.post("/items", response_model=Item)
-async def create_item(item: Item):
-    db["items"].append(item)
-    return item
+
+@app.post("/chat")
+async def chat_bot(input: Input):
+    website = requests.get(input.link)
+    soup = BeautifulSoup(website.text, "html.parser")
+    body_content = soup.body.get_text(separator="\n", strip=True) # Extract plain text
+    
+    response = client.chat.completions.create(
+    messages=[
+       {
+            "role": "system",
+            "content": "You are a helpful assistant. From website response answer the question. The website content is: " + body_content
+        },
+        {
+            "role": "user",
+            "content": input.prompt
+        }
+    ],
+    model="llama-3.3-70b-versatile",
+    )
+    return response.choices[0].message.content
+    
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="localhost", port=8000)
